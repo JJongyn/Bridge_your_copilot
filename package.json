@@ -1,10 +1,9 @@
 {
-  "name": "copilot-bridge",
-  "displayName": "Copilot Bridge",
-  "description": "Local HTTP bridge from VS Code's Language Model API to external tools such as Python.",
-  "version": "0.0.1",
+  "name": "bridge-your-copilot",
+  "displayName": "Bridge your Copilot",
+  "description": "Expose the VS Code Language Model API over localhost for Python tools and OpenAI-compatible clients.",
+  "version": "0.1.0",
   "publisher": "local",
-  "private": true,
   "repository": {
     "type": "git",
     "url": "https://github.com/JJongyn/Bridge_your_copilot.git"
@@ -16,61 +15,75 @@
   "categories": [
     "Other"
   ],
-  "main": "./extension.js",
+  "keywords": [
+    "copilot",
+    "vscode",
+    "bridge",
+    "openai",
+    "python"
+  ],
+  "files": [
+    "src/**",
+    "python/**",
+    "README.md",
+    "package.json",
+    "pyproject.toml"
+  ],
+  "main": "./src/extension.js",
   "activationEvents": [
-    "onCommand:copilotBridge.startServer",
-    "onCommand:copilotBridge.stopServer",
-    "onCommand:copilotBridge.showStatus"
+    "onCommand:bridgeYourCopilot.startServer",
+    "onCommand:bridgeYourCopilot.stopServer",
+    "onCommand:bridgeYourCopilot.showStatus"
   ],
   "contributes": {
     "commands": [
       {
-        "command": "copilotBridge.startServer",
-        "title": "Copilot Bridge: Start Server"
+        "command": "bridgeYourCopilot.startServer",
+        "title": "Bridge your Copilot: Start Server"
       },
       {
-        "command": "copilotBridge.stopServer",
-        "title": "Copilot Bridge: Stop Server"
+        "command": "bridgeYourCopilot.stopServer",
+        "title": "Bridge your Copilot: Stop Server"
       },
       {
-        "command": "copilotBridge.showStatus",
-        "title": "Copilot Bridge: Show Status"
+        "command": "bridgeYourCopilot.showStatus",
+        "title": "Bridge your Copilot: Show Status"
       }
     ],
     "configuration": {
-      "title": "Copilot Bridge",
+      "title": "Bridge your Copilot",
       "properties": {
-        "copilotBridge.port": {
+        "bridgeYourCopilot.port": {
           "type": "number",
           "default": 8765,
           "minimum": 1024,
           "maximum": 65535,
-          "description": "Localhost port used by the Copilot Bridge server."
+          "description": "Localhost port used by the bridge server."
         },
-        "copilotBridge.host": {
+        "bridgeYourCopilot.host": {
           "type": "string",
           "default": "127.0.0.1",
           "description": "Host interface bound by the bridge. Keep this on 127.0.0.1 unless you understand the security implications."
         },
-        "copilotBridge.modelFamily": {
+        "bridgeYourCopilot.modelFamily": {
           "type": "string",
           "default": "",
           "description": "Optional Copilot model family selector, for example gpt-4o, gpt-4o-mini, or claude-3.5-sonnet."
         },
-        "copilotBridge.defaultInstruction": {
+        "bridgeYourCopilot.defaultInstruction": {
           "type": "string",
           "default": "",
           "description": "Optional instruction prepended as a user message to every request."
         },
-        "copilotBridge.authToken": {
+        "bridgeYourCopilot.authToken": {
           "type": "string",
           "default": "",
-          "description": "Optional shared secret. When set, callers must send it as X-Copilot-Bridge-Token."
+          "description": "Optional shared secret. When set, callers must send it as X-Bridge-Your-Copilot-Token."
         }
       }
     }
   },
   "scripts": {
-    "check": "node --check extension.js && env PYTHONPYCACHEPREFIX=/tmp python3 -m py_compile python/copilot_bridge_client.py python/copilot_bridge/client.py python/copilot_bridge/__init__.py"
+    "check": "node --check src/extension.js && env PYTHONPYCACHEPREFIX=/tmp python3 -m py_compile python/bridge_your_copilot/__init__.py python/bridge_your_copilot/client.py python/bridge_your_copilot/cli.py"
   }
 }

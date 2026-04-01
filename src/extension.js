@@ -1,0 +1,669 @@
+const http = require('http')
+const vscode = require('vscode')
+
+const EXTENSION_NAME = 'Bridge your Copilot'
+const CONFIG_SECTION = 'bridgeYourCopilot'
+const TOKEN_HEADER = 'x-bridge-your-copilot-token'
+
+let outputChannel
+let server
+let selectedModel
+let selectedModelSummary = 'uninitialized'
+
+function assertLanguageModelApiAvailable() {
+  if (
+    !vscode.lm ||
+    typeof vscode.lm.selectChatModels !== 'function' ||
+    !vscode.LanguageModelChatMessage ||
+    !vscode.LanguageModelTextPart
+  ) {
+    throw new Error(
+      'This extension requires VS Code 1.91 or newer with the Language Model API available.'
+    )
+  }
+}
+
+function getConfig() {
+  const config = vscode.workspace.getConfiguration(CONFIG_SECTION)
+  return {
+    host: config.get('host', '127.0.0.1'),
+    port: config.get('port', 8765),
+    modelFamily: (config.get('modelFamily', '') || '').trim(),
+    defaultInstruction: config.get('defaultInstruction', '') || '',
+    authToken: config.get('authToken', '') || ''
+  }
+}
+
+function log(message) {
+  outputChannel.appendLine(`[${new Date().toISOString()}] ${message}`)
+}
+
+function buildModelMetadata(model) {
+  return {
+    id: model.id,
+    family: model.family,
+    version: model.version,
+    vendor: model.vendor,
+    maxInputTokens: model.maxInputTokens
+  }
+}
+
+function jsonResponse(res, statusCode, body) {
+  const payload = JSON.stringify(body, null, 2)
+  res.writeHead(statusCode, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': Buffer.byteLength(payload, 'utf8')
+  })
+  res.end(payload)
+}
+
+function errorBody(message, type = 'invalid_request_error', code) {
+  return {
+    error: {
+      message,
+      type,
+      code: code || null
+    }
+  }
+}
+
+function errorResponse(res, statusCode, message, type = 'invalid_request_error', code) {
+  jsonResponse(res, statusCode, errorBody(message, type, code))
+}
+
+function startSse(res) {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no'
+  })
+
+  if (typeof res.flushHeaders === 'function') {
+    res.flushHeaders()
+  }
+}
+
+function writeSseEvent(res, data, eventName) {
+  if (eventName) {
+    res.write(`event: ${eventName}\n`)
+  }
+  res.write(`data: ${typeof data === 'string' ? data : JSON.stringify(data)}\n\n`)
+}
+
+function readRequestBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = ''
+
+    req.on('data', chunk => {
+      body += chunk
+      if (body.length > 1024 * 1024) {
+        reject(new Error('Request body too large'))
+        req.destroy()
+      }
+    })
+
+    req.on('end', () => resolve(body))
+    req.on('error', reject)
+  })
+}
+
+function normalizeContent(content) {
+  if (typeof content === 'string') {
+    return content
+  }
+
+  if (Array.isArray(content)) {
+    return content
+      .map(part => {
+        if (!part || typeof part !== 'object') {
+          return ''
+        }
+
+        if (part.type === 'text' && typeof part.text === 'string') {
+          return part.text
+        }
+
+        if (typeof part.content === 'string') {
+          return part.content
+        }
+
+        return ''
+      })
+      .filter(Boolean)
+      .join('\n')
+  }
+
+  if (content && typeof content === 'object' && typeof content.text === 'string') {
+    return content.text
+  }
+
+  return ''
+}
+
+function appendUserInstruction(messages, instruction) {
+  const text = typeof instruction === 'string' ? instruction.trim() : ''
+  if (text) {
+    messages.push(vscode.LanguageModelChatMessage.User(text))
+  }
+}
+
+function createBridgeMessages(payload, config) {
+  const messages = []
+
+  appendUserInstruction(messages, config.defaultInstruction)
+  appendUserInstruction(messages, payload.instruction)
+
+  if (Array.isArray(payload.messages) && payload.messages.length > 0) {
+    for (const message of payload.messages) {
+      const content = normalizeContent(message && message.content)
+      if (!content) {
+        throw new Error('Each message must include string content')
+      }
+
+      if (message.role === 'assistant') {
+        messages.push(vscode.LanguageModelChatMessage.Assistant(content))
+      } else {
+        messages.push(vscode.LanguageModelChatMessage.User(content))
+      }
+    }
+    return messages
+  }
+
+  if (typeof payload.prompt === 'string' && payload.prompt.trim()) {
+    messages.push(vscode.LanguageModelChatMessage.User(payload.prompt))
+    return messages
+  }
+
+  throw new Error('Request must include either prompt or messages')
+}
+
+function createOpenAIChatMessages(payload, config) {
+  const messages = []
+
+  appendUserInstruction(messages, config.defaultInstruction)
+
+  if (typeof payload.instructions === 'string' && payload.instructions.trim()) {
+    messages.push(vscode.LanguageModelChatMessage.User(payload.instructions))
+  }
+
+  if (!Array.isArray(payload.messages) || payload.messages.length === 0) {
+    throw new Error('OpenAI-compatible requests require a non-empty messages array')
+  }
+
+  for (const message of payload.messages) {
+    const content = normalizeContent(message && message.content)
+    if (!content) {
+      continue
+    }
+
+    if (message.role === 'assistant') {
+      messages.push(vscode.LanguageModelChatMessage.Assistant(content))
+      continue
+    }
+
+    messages.push(vscode.LanguageModelChatMessage.User(content))
+  }
+
+  if (messages.length === 0) {
+    throw new Error('No supported text content found in messages')
+  }
+
+  return messages
+}
+
+function getSelectedModelInfo() {
+  if (!selectedModel) {
+    return null
+  }
+
+  return {
+    id: selectedModel.id,
+    object: 'model',
+    created: 0,
+    owned_by: selectedModel.vendor,
+    family: selectedModel.family,
+    version: selectedModel.version,
+    max_input_tokens: selectedModel.maxInputTokens
+  }
+}
+
+function getAuthorizationToken(req) {
+  const bearer = req.headers.authorization
+  if (typeof bearer === 'string' && bearer.startsWith('Bearer ')) {
+    return bearer.slice('Bearer '.length).trim()
+  }
+
+  const header = req.headers[TOKEN_HEADER]
+  if (Array.isArray(header)) {
+    return header[0]
+  }
+
+  return typeof header === 'string' ? header : ''
+}
+
+function isAuthorized(req, expectedToken) {
+  if (!expectedToken) {
+    return true
+  }
+
+  return getAuthorizationToken(req) === expectedToken
+}
+
+async function selectModelFromUserAction() {
+  assertLanguageModelApiAvailable()
+  const config = getConfig()
+  const selector = { vendor: 'copilot' }
+
+  if (config.modelFamily) {
+    selector.family = config.modelFamily
+  }
+
+  log(`Selecting Copilot model with selector ${JSON.stringify(selector)}`)
+
+  const models = await vscode.lm.selectChatModels(selector)
+  if (!models.length) {
+    throw new Error(
+      config.modelFamily
+        ? `No Copilot models available for family "${config.modelFamily}"`
+        : 'No Copilot models available'
+    )
+  }
+
+  selectedModel = models[0]
+  selectedModelSummary = `${selectedModel.vendor}/${selectedModel.family} (${selectedModel.id})`
+  log(`Selected model ${selectedModelSummary}`)
+  return selectedModel
+}
+
+async function ensureModelAvailable() {
+  if (selectedModel) {
+    return selectedModel
+  }
+
+  throw new Error(
+    `No model selected. Run "${EXTENSION_NAME}: Start Server" from the Command Palette first.`
+  )
+}
+
+function extractTextPart(chunk) {
+  if (chunk instanceof vscode.LanguageModelTextPart) {
+    return chunk.value
+  }
+
+  if (typeof chunk === 'string') {
+    return chunk
+  }
+
+  if (chunk && typeof chunk.value === 'string') {
+    return chunk.value
+  }
+
+  return ''
+}
+
+async function startModelRequest(messages) {
+  const model = await ensureModelAvailable()
+  const tokenSource = new vscode.CancellationTokenSource()
+  const response = await model.sendRequest(messages, {}, tokenSource.token)
+  return { model, response, tokenSource }
+}
+
+async function consumeModelText(request, onTextPart) {
+  let text = ''
+
+  try {
+    for await (const chunk of request.response.stream) {
+      const delta = extractTextPart(chunk)
+      if (!delta) {
+        continue
+      }
+
+      text += delta
+      if (onTextPart) {
+        await onTextPart(delta, text, request.model)
+      }
+    }
+  } finally {
+    request.tokenSource.dispose()
+  }
+
+  return text
+}
+
+async function generateText(messages) {
+  const request = await startModelRequest(messages)
+  const text = await consumeModelText(request)
+  return { model: request.model, text }
+}
+
+function makeBridgeResponse(model, text) {
+  return {
+    model: buildModelMetadata(model),
+    content: text
+  }
+}
+
+function createCompletionId() {
+  return `chatcmpl-${Date.now()}`
+}
+
+function makeOpenAIChatCompletion(model, completionId, created, text) {
+  return {
+    id: completionId,
+    object: 'chat.completion',
+    created,
+    model: model.id,
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: text
+        },
+        finish_reason: 'stop'
+      }
+    ],
+    usage: {
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      total_tokens: 0
+    }
+  }
+}
+
+function makeOpenAIStreamChunk(model, completionId, created, delta, finishReason) {
+  return {
+    id: completionId,
+    object: 'chat.completion.chunk',
+    created,
+    model: model.id,
+    choices: [
+      {
+        index: 0,
+        delta,
+        finish_reason: finishReason || null
+      }
+    ]
+  }
+}
+
+async function handleBridgeChat(payload) {
+  const config = getConfig()
+  const messages = createBridgeMessages(payload, config)
+  log(`Forwarding bridge request with ${messages.length} prompt messages to ${selectedModelSummary}`)
+  const { model, text } = await generateText(messages)
+  return makeBridgeResponse(model, text)
+}
+
+async function handleOpenAIChatCompletion(payload) {
+  const config = getConfig()
+  const messages = createOpenAIChatMessages(payload, config)
+  log(
+    `Forwarding OpenAI-compatible request with ${messages.length} prompt messages to ${selectedModelSummary}`
+  )
+  const { model, text } = await generateText(messages)
+  return makeOpenAIChatCompletion(model, createCompletionId(), Math.floor(Date.now() / 1000), text)
+}
+
+async function streamBridgeChat(payload, req, res) {
+  const config = getConfig()
+  const messages = createBridgeMessages(payload, config)
+  const request = await startModelRequest(messages)
+  const closeListener = () => request.tokenSource.cancel()
+
+  log(`Streaming bridge request with ${messages.length} prompt messages to ${selectedModelSummary}`)
+  req.on('close', closeListener)
+  startSse(res)
+
+  try {
+    await consumeModelText(request, delta => {
+      writeSseEvent(res, { delta }, 'chunk')
+    })
+    writeSseEvent(res, { done: true, model: buildModelMetadata(request.model) }, 'done')
+    res.end()
+  } finally {
+    req.off('close', closeListener)
+  }
+}
+
+async function streamOpenAIChatCompletion(payload, req, res) {
+  const config = getConfig()
+  const messages = createOpenAIChatMessages(payload, config)
+  const request = await startModelRequest(messages)
+  const completionId = createCompletionId()
+  const created = Math.floor(Date.now() / 1000)
+  const closeListener = () => request.tokenSource.cancel()
+
+  log(
+    `Streaming OpenAI-compatible request with ${messages.length} prompt messages to ${selectedModelSummary}`
+  )
+  req.on('close', closeListener)
+  startSse(res)
+
+  try {
+    writeSseEvent(
+      res,
+      makeOpenAIStreamChunk(request.model, completionId, created, { role: 'assistant' }, null)
+    )
+
+    await consumeModelText(request, delta => {
+      writeSseEvent(
+        res,
+        makeOpenAIStreamChunk(request.model, completionId, created, { content: delta }, null)
+      )
+    })
+
+    writeSseEvent(
+      res,
+      makeOpenAIStreamChunk(request.model, completionId, created, {}, 'stop')
+    )
+    writeSseEvent(res, '[DONE]')
+    res.end()
+  } finally {
+    req.off('close', closeListener)
+  }
+}
+
+function respondWithStreamError(res, error) {
+  const message = error instanceof Error ? error.message : String(error)
+  writeSseEvent(res, errorBody(message), 'error')
+  res.end()
+}
+
+async function startServer() {
+  if (server) {
+    vscode.window.showInformationMessage(`${EXTENSION_NAME} server is already running.`)
+    return
+  }
+
+  await selectModelFromUserAction()
+  const config = getConfig()
+
+  server = http.createServer(async (req, res) => {
+    try {
+      const url = new URL(req.url || '/', `http://${config.host}:${config.port}`)
+
+      if (req.method === 'GET' && url.pathname === '/healthz') {
+        jsonResponse(res, 200, {
+          ok: true,
+          status: 'running',
+          model: selectedModelSummary
+        })
+        return
+      }
+
+      if (
+        req.method === 'GET' &&
+        (url.pathname === '/models' || url.pathname === '/v1/models')
+      ) {
+        const modelInfo = getSelectedModelInfo()
+        if (!modelInfo) {
+          errorResponse(res, 503, 'Model not selected')
+          return
+        }
+
+        jsonResponse(res, 200, {
+          object: 'list',
+          data: [modelInfo]
+        })
+        return
+      }
+
+      if (!isAuthorized(req, config.authToken)) {
+        errorResponse(res, 401, 'Unauthorized', 'authentication_error')
+        return
+      }
+
+      if (req.method === 'POST' && url.pathname === '/v1/chat') {
+        const rawBody = await readRequestBody(req)
+        const payload = rawBody ? JSON.parse(rawBody) : {}
+
+        if (payload.stream === true) {
+          try {
+            await streamBridgeChat(payload, req, res)
+          } catch (error) {
+            log(`Streaming bridge request failed: ${error instanceof Error ? error.message : String(error)}`)
+            if (res.headersSent) {
+              respondWithStreamError(res, error)
+            } else {
+              throw error
+            }
+          }
+          return
+        }
+
+        const result = await handleBridgeChat(payload)
+        jsonResponse(res, 200, result)
+        return
+      }
+
+      if (req.method === 'POST' && url.pathname === '/v1/chat/completions') {
+        const rawBody = await readRequestBody(req)
+        const payload = rawBody ? JSON.parse(rawBody) : {}
+
+        if (payload.stream === true) {
+          try {
+            await streamOpenAIChatCompletion(payload, req, res)
+          } catch (error) {
+            log(
+              `Streaming OpenAI-compatible request failed: ${error instanceof Error ? error.message : String(error)}`
+            )
+            if (res.headersSent) {
+              respondWithStreamError(res, error)
+            } else {
+              throw error
+            }
+          }
+          return
+        }
+
+        const result = await handleOpenAIChatCompletion(payload)
+        jsonResponse(res, 200, result)
+        return
+      }
+
+      errorResponse(res, 404, 'Not found')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      log(`Request failed: ${message}`)
+
+      if (error instanceof vscode.LanguageModelError) {
+        errorResponse(res, 502, message, 'language_model_error', error.code)
+        return
+      }
+
+      errorResponse(res, 400, message)
+    }
+  })
+
+  await new Promise((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(config.port, config.host, resolve)
+  })
+
+  log(`${EXTENSION_NAME} listening on http://${config.host}:${config.port}`)
+  vscode.window.showInformationMessage(
+    `${EXTENSION_NAME} listening on http://${config.host}:${config.port}`
+  )
+}
+
+async function stopServer() {
+  if (!server) {
+    vscode.window.showInformationMessage(`${EXTENSION_NAME} server is not running.`)
+    return
+  }
+
+  await new Promise((resolve, reject) => {
+    server.close(error => {
+      if (error) {
+        reject(error)
+        return
+      }
+
+      resolve()
+    })
+  })
+
+  log(`${EXTENSION_NAME} server stopped`)
+  server = undefined
+  selectedModel = undefined
+  selectedModelSummary = 'stopped'
+  vscode.window.showInformationMessage(`${EXTENSION_NAME} server stopped.`)
+}
+
+function showStatus() {
+  const config = getConfig()
+  const state = server ? 'running' : 'stopped'
+  vscode.window.showInformationMessage(
+    `${EXTENSION_NAME} is ${state} on http://${config.host}:${config.port} using ${selectedModelSummary}`
+  )
+}
+
+function activate(context) {
+  outputChannel = vscode.window.createOutputChannel(EXTENSION_NAME)
+  context.subscriptions.push(outputChannel)
+
+  if (!vscode.lm || typeof vscode.lm.selectChatModels !== 'function') {
+    log('Language Model API not available. VS Code 1.91 or newer is required.')
+  }
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('bridgeYourCopilot.startServer', async () => {
+      try {
+        await startServer()
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        log(`Failed to start server: ${message}`)
+        vscode.window.showErrorMessage(`${EXTENSION_NAME} failed to start: ${message}`)
+      }
+    })
+  )
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('bridgeYourCopilot.stopServer', async () => {
+      try {
+        await stopServer()
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        log(`Failed to stop server: ${message}`)
+        vscode.window.showErrorMessage(`${EXTENSION_NAME} failed to stop: ${message}`)
+      }
+    })
+  )
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('bridgeYourCopilot.showStatus', showStatus)
+  )
+}
+
+async function deactivate() {
+  if (server) {
+    await stopServer()
+  }
+}
+
+module.exports = {
+  activate,
+  deactivate
+}
