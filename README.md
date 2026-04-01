@@ -25,7 +25,7 @@ It runs as a VS Code extension, starts a local HTTP server from the Command Pale
 ## Project layout
 
 - `src/extension.js`: VS Code extension entrypoint and HTTP bridge
-- `python/bridge_your_copilot/`: Python client package
+- `copilot/`: Python client package
 - `pyproject.toml`: Python packaging metadata
 - `package.json`: VS Code extension manifest
 
@@ -100,18 +100,18 @@ pip install -e .
 Python usage:
 
 ```python
-from bridge_your_copilot import BridgeYourCopilotClient
+from copilot import CopilotClient
 
-client = BridgeYourCopilotClient(api_key="my-local-token")
+client = CopilotClient(api_key="my-local-token")
 print(client.ask("Summarize the latest git diff in Korean."))
 ```
 
 Streaming with Python:
 
 ```python
-from bridge_your_copilot import BridgeYourCopilotClient
+from copilot import CopilotClient
 
-client = BridgeYourCopilotClient()
+client = CopilotClient()
 for chunk in client.stream_chat_completion(
     [{"role": "user", "content": "Write a short release note."}]
 ):

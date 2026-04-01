@@ -13,10 +13,8 @@ authors = [
 ]
 
 [project.scripts]
-bridge-your-copilot = "bridge_your_copilot.cli:main"
-
-[tool.setuptools]
-package-dir = {"" = "python"}
+bridge-your-copilot = "copilot.cli:main"
 
 [tool.setuptools.packages.find]
-where = ["python"]
+where = ["."]
+include = ["copilot*"]

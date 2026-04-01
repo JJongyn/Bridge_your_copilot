@@ -24,7 +24,7 @@
   ],
   "files": [
     "src/**",
-    "python/**",
+    "copilot/**",
     "README.md",
     "package.json",
     "pyproject.toml"
@@ -84,6 +84,6 @@
     }
   },
   "scripts": {
-    "check": "node --check src/extension.js && env PYTHONPYCACHEPREFIX=/tmp python3 -m py_compile python/bridge_your_copilot/__init__.py python/bridge_your_copilot/client.py python/bridge_your_copilot/cli.py"
+    "check": "node --check src/extension.js && env PYTHONPYCACHEPREFIX=/tmp python3 -m py_compile copilot/__init__.py copilot/client.py copilot/cli.py"
   }
 }

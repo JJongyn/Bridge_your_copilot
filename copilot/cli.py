@@ -7,8 +7,8 @@ import argparse
 import json
 import sys
 
-from bridge_your_copilot import BridgeYourCopilotClient
-from bridge_your_copilot.client import BridgeYourCopilotError
+from copilot import CopilotClient
+from copilot.client import CopilotError
 
 
 def parse_args() -> argparse.Namespace:
@@ -62,7 +62,7 @@ def main() -> int:
         print("error: provide a prompt or --messages-json", file=sys.stderr)
         return 2
 
-    client = BridgeYourCopilotClient(
+    client = CopilotClient(
         base_url=normalize_base_url(args.url),
         api_key=args.token or None,
     )
@@ -97,7 +97,7 @@ def main() -> int:
 
         print(client.ask(args.prompt, instruction=args.instruction))
         return 0
-    except BridgeYourCopilotError as exc:
+    except CopilotError as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
