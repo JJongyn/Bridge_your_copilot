@@ -1,0 +1,76 @@
+{
+  "name": "copilot-bridge",
+  "displayName": "Copilot Bridge",
+  "description": "Local HTTP bridge from VS Code's Language Model API to external tools such as Python.",
+  "version": "0.0.1",
+  "publisher": "local",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JJongyn/Bridge_your_copilot.git"
+  },
+  "homepage": "https://github.com/JJongyn/Bridge_your_copilot",
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onCommand:copilotBridge.startServer",
+    "onCommand:copilotBridge.stopServer",
+    "onCommand:copilotBridge.showStatus"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "copilotBridge.startServer",
+        "title": "Copilot Bridge: Start Server"
+      },
+      {
+        "command": "copilotBridge.stopServer",
+        "title": "Copilot Bridge: Stop Server"
+      },
+      {
+        "command": "copilotBridge.showStatus",
+        "title": "Copilot Bridge: Show Status"
+      }
+    ],
+    "configuration": {
+      "title": "Copilot Bridge",
+      "properties": {
+        "copilotBridge.port": {
+          "type": "number",
+          "default": 8765,
+          "minimum": 1024,
+          "maximum": 65535,
+          "description": "Localhost port used by the Copilot Bridge server."
+        },
+        "copilotBridge.host": {
+          "type": "string",
+          "default": "127.0.0.1",
+          "description": "Host interface bound by the bridge. Keep this on 127.0.0.1 unless you understand the security implications."
+        },
+        "copilotBridge.modelFamily": {
+          "type": "string",
+          "default": "",
+          "description": "Optional Copilot model family selector, for example gpt-4o, gpt-4o-mini, or claude-3.5-sonnet."
+        },
+        "copilotBridge.defaultInstruction": {
+          "type": "string",
+          "default": "",
+          "description": "Optional instruction prepended as a user message to every request."
+        },
+        "copilotBridge.authToken": {
+          "type": "string",
+          "default": "",
+          "description": "Optional shared secret. When set, callers must send it as X-Copilot-Bridge-Token."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "check": "node --check extension.js && env PYTHONPYCACHEPREFIX=/tmp python3 -m py_compile python/copilot_bridge_client.py python/copilot_bridge/client.py python/copilot_bridge/__init__.py"
+  }
+}

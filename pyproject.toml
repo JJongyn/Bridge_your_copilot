@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "copilot-bridge-client"
+version = "0.1.0"
+description = "Python client for the local VS Code Copilot Bridge."
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [
+  { name = "Local Team" }
+]
+
+[tool.setuptools]
+package-dir = {"" = "python"}
+
+[tool.setuptools.packages.find]
+where = ["python"]
