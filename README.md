@@ -6,15 +6,15 @@
 [![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![OpenAI Compatible](https://img.shields.io/badge/API-OpenAI%20Compatible-10A37F)](#openai-compatible-api)
 
-Bridge-your-copilot exposes the VS Code Language Model API over `localhost` so your scripts, agents, and local tools can reuse GitHub Copilot access from your editor.
+Bridge-your-copilot exposes the VS Code Language Model API over `localhost` so local scripts, agents, and tools can reuse GitHub Copilot access from your editor.
 
-It runs as a VS Code extension and provides:
+It ships as a VS Code extension with:
 
 - a native `POST /v1/chat` endpoint
 - an OpenAI-compatible `POST /v1/chat/completions` endpoint
 - SSE streaming for both APIs
 - generated or user-supplied access tokens
-- request-level model routing by model id or family
+- per-request model routing by model id or family
 
 ## Requirements
 
@@ -24,7 +24,7 @@ It runs as a VS Code extension and provides:
 
 ## Project Layout
 
-- `src/extension.js`: VS Code activation, server lifecycle, token and model UX
+- `src/extension.js`: activation, server lifecycle, token and model UX
 - `src/http-handler.js`: testable HTTP routing, auth, JSON, and SSE helpers
 - `src/model-selection.js`: model matching and default selection logic
 - `bridge_your_copilot/`: Python client package and CLI
@@ -36,21 +36,27 @@ It runs as a VS Code extension and provides:
 1. Open the repository in VS Code.
 2. Press `F5` to launch an Extension Development Host.
 3. Run `Bridge your Copilot: Start Server`.
-4. Optionally run:
-   `Bridge your Copilot: Copy Access Token`
-5. Or run:
-   `Bridge your Copilot: Copy Connection Info`
+4. Run `Bridge your Copilot: Copy Connection Info` or `Bridge your Copilot: Copy Access Token`.
+5. Call the local bridge on `http://127.0.0.1:8765`.
 
-The extension uses `bridgeYourCopilot.authToken` if you set one. If you leave it empty, it generates a local token and stores it in VS Code secret storage. You can rotate that generated token with `Bridge your Copilot: Rotate Access Token`.
+If `bridgeYourCopilot.authToken` is empty, the extension generates a local token and stores it in VS Code secret storage. You can rotate it later with `Bridge your Copilot: Rotate Access Token`.
+
+## Command Palette
+
+- `Bridge your Copilot: Start Server`: starts the local bridge and selects a default model
+- `Bridge your Copilot: Stop Server`: stops the local bridge
+- `Bridge your Copilot: Show Status`: shows base URL and current model
+- `Bridge your Copilot: Select Model`: chooses the default model for requests without `model`
+- `Bridge your Copilot: Reveal Model Details`: lists all discovered models in the output panel
+- `Bridge your Copilot: Copy Access Token`: copies the active bearer token
+- `Bridge your Copilot: Copy Connection Info`: copies base URL, token, and selected model
+- `Bridge your Copilot: Rotate Access Token`: generates a new stored token when settings do not override one
 
 ## Model Selection
 
-- `Bridge your Copilot: Select Model` chooses the default model used when requests omit `model`
-- `Bridge your Copilot: Reveal Model Details` shows the current default and all discovered models
-- `GET /v1/models` returns model ids, families, versions, and which model is currently selected
-- each request can override the default with `model` or `modelFamily`
-
-If `bridgeYourCopilot.modelFamily` is empty, startup tries `gpt-5.1 mini` aliases first, then `gpt-5 mini`, then the first available Copilot model.
+- `GET /v1/models` returns discovered model ids, families, versions, and which model is selected
+- every request can override the default with `model` or `modelFamily`
+- if `bridgeYourCopilot.modelFamily` is empty, startup tries `gpt-5.1 mini` aliases first, then `gpt-5 mini`, then the first available Copilot model
 
 ## API
 
