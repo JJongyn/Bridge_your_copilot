@@ -62,6 +62,7 @@ The extension can manage the access token for you:
   `Bridge your Copilot: Copy Connection Info`
 - use the Command Palette:
   `Bridge your Copilot: Select Model`
+- if `bridgeYourCopilot.modelFamily` is empty, the extension first tries `gpt-5.1 mini` aliases, then `gpt-5 mini`, then the first available model
 
 ## Native API
 
@@ -175,7 +176,7 @@ VS Code settings:
 
 - `bridgeYourCopilot.port`: local port, default `8765`
 - `bridgeYourCopilot.host`: bind host, default `127.0.0.1`
-- `bridgeYourCopilot.modelFamily`: optional model family such as `gpt-4o`
+- `bridgeYourCopilot.modelFamily`: optional preferred model family; if empty the extension first tries `gpt-5.1 mini` aliases and then `gpt-5 mini`
 - `bridgeYourCopilot.defaultInstruction`: prepended as a user message
 - `bridgeYourCopilot.authToken`: optional shared secret override accepted as `Authorization: Bearer ...` or `X-Bridge-Your-Copilot-Token`
 

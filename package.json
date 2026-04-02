@@ -83,7 +83,7 @@
         "bridgeYourCopilot.modelFamily": {
           "type": "string",
           "default": "",
-          "description": "Preferred Copilot model family selected when the server starts, for example gpt-4o, gpt-4o-mini, or claude-3.5-sonnet."
+          "description": "Preferred Copilot model family selected when the server starts. When empty, the extension first tries GPT-5.1 mini aliases and then falls back to GPT-5 mini or the first available model."
         },
         "bridgeYourCopilot.defaultInstruction": {
           "type": "string",

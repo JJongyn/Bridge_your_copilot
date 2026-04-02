@@ -6,6 +6,12 @@ const EXTENSION_NAME = 'Bridge your Copilot'
 const CONFIG_SECTION = 'bridgeYourCopilot'
 const TOKEN_HEADER = 'x-bridge-your-copilot-token'
 const TOKEN_SECRET_KEY = 'bridge-your-copilot.auth-token'
+const DEFAULT_MODEL_PREFERENCES = [
+  'gpt-5.1 mini',
+  'gpt-5.1-mini',
+  'gpt-5 mini',
+  'gpt-5-mini'
+]
 
 let outputChannel
 let server
@@ -318,7 +324,18 @@ function findModelMatch(requestedModel) {
 }
 
 function pickInitialModel(models, requestedModel) {
-  return findModelMatch(requestedModel) || models[0]
+  if (requestedModel) {
+    return findModelMatch(requestedModel) || models[0]
+  }
+
+  for (const candidate of DEFAULT_MODEL_PREFERENCES) {
+    const matched = findModelMatch(candidate)
+    if (matched) {
+      return matched
+    }
+  }
+
+  return models[0]
 }
 
 async function refreshAvailableModelsFromUserAction() {
