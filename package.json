@@ -4,11 +4,15 @@
   "description": "Expose the VS Code Language Model API over localhost for Python tools and OpenAI-compatible clients.",
   "version": "0.1.0",
   "publisher": "local",
+  "license": "SEE LICENSE IN LICENSE",
   "repository": {
     "type": "git",
     "url": "https://github.com/JJongyn/Bridge_your_copilot.git"
   },
   "homepage": "https://github.com/JJongyn/Bridge_your_copilot",
+  "bugs": {
+    "url": "https://github.com/JJongyn/Bridge_your_copilot/issues"
+  },
   "engines": {
     "vscode": "^1.91.0"
   },
@@ -24,11 +28,14 @@
   ],
   "files": [
     "src/**",
-    "copilot/**",
+    "bridge_your_copilot/**",
+    "assets/icon.png",
     "README.md",
+    "LICENSE",
     "package.json",
     "pyproject.toml"
   ],
+  "icon": "assets/icon.png",
   "main": "./src/extension.js",
   "activationEvents": [
     "onCommand:bridgeYourCopilot.startServer",
@@ -36,7 +43,9 @@
     "onCommand:bridgeYourCopilot.showStatus",
     "onCommand:bridgeYourCopilot.selectModel",
     "onCommand:bridgeYourCopilot.copyAccessToken",
-    "onCommand:bridgeYourCopilot.copyConnectionInfo"
+    "onCommand:bridgeYourCopilot.copyConnectionInfo",
+    "onCommand:bridgeYourCopilot.rotateAccessToken",
+    "onCommand:bridgeYourCopilot.revealModelDetails"
   ],
   "contributes": {
     "commands": [
@@ -63,6 +72,14 @@
       {
         "command": "bridgeYourCopilot.copyConnectionInfo",
         "title": "Bridge your Copilot: Copy Connection Info"
+      },
+      {
+        "command": "bridgeYourCopilot.rotateAccessToken",
+        "title": "Bridge your Copilot: Rotate Access Token"
+      },
+      {
+        "command": "bridgeYourCopilot.revealModelDetails",
+        "title": "Bridge your Copilot: Reveal Model Details"
       }
     ],
     "configuration": {
@@ -99,6 +116,7 @@
     }
   },
   "scripts": {
-    "check": "node --check src/extension.js && env PYTHONPYCACHEPREFIX=/tmp python3 -m py_compile copilot/__init__.py copilot/client.py copilot/cli.py"
+    "check": "node --check src/extension.js && node --check src/http-handler.js && node --check src/model-selection.js && env PYTHONPYCACHEPREFIX=/tmp python3 -m py_compile bridge_your_copilot/__init__.py bridge_your_copilot/client.py bridge_your_copilot/cli.py",
+    "test": "node --test tests/*.test.js"
   }
 }

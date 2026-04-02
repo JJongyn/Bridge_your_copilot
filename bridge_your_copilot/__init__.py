@@ -1,8 +1,8 @@
 from .client import (
-    CopilotClient,
-    CopilotError,
     BridgeYourCopilotClient,
     BridgeYourCopilotError,
+    CopilotClient,
+    CopilotError,
     CopilotBridgeClient,
     CopilotBridgeError,
 )

@@ -7,14 +7,19 @@ name = "bridge-your-copilot-client"
 version = "0.1.0"
 description = "Python client for the local Bridge your Copilot VS Code extension."
 readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.9"
 authors = [
   { name = "Local Team" }
 ]
 
+[project.urls]
+Homepage = "https://github.com/JJongyn/Bridge_your_copilot"
+Issues = "https://github.com/JJongyn/Bridge_your_copilot/issues"
+
 [project.scripts]
-bridge-your-copilot = "copilot.cli:main"
+bridge-your-copilot = "bridge_your_copilot.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["copilot*"]
+include = ["bridge_your_copilot*"]

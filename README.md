@@ -1,120 +1,116 @@
 # Bridge-your-copilot
 
+[![CI](https://github.com/JJongyn/Bridge_your_copilot/actions/workflows/ci.yml/badge.svg)](https://github.com/JJongyn/Bridge_your_copilot/actions/workflows/ci.yml)
+[![Release VSIX](https://github.com/JJongyn/Bridge_your_copilot/actions/workflows/release.yml/badge.svg)](https://github.com/JJongyn/Bridge_your_copilot/actions/workflows/release.yml)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.91%2B-007ACC?logo=visualstudiocode&logoColor=white)](https://code.visualstudio.com/updates/v1_91)
 [![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![OpenAI Compatible](https://img.shields.io/badge/API-OpenAI%20Compatible-10A37F)](#openai-compatible-api)
-[![Localhost Only](https://img.shields.io/badge/Security-Localhost%20First-555555)](#configuration)
 
-Bridge-your-copilot exposes the VS Code Language Model API over `localhost` so your own scripts, tools, and agents can reuse the GitHub Copilot access already available in VS Code.
+Bridge-your-copilot exposes the VS Code Language Model API over `localhost` so your scripts, agents, and local tools can reuse GitHub Copilot access from your editor.
 
-It runs as a VS Code extension, starts a local HTTP server from the Command Palette, and supports both a small native API and an OpenAI-compatible chat completions API.
+It runs as a VS Code extension and provides:
 
-## Why use it
-
-- Reuse Copilot access from Python, shell scripts, and local agent tools
-- Call a simple local endpoint instead of automating the VS Code UI
-- Use OpenAI SDKs against `http://127.0.0.1:8765/v1`
-- Stream chat completion output when your client supports SSE
-- Let the extension generate and copy a local access token for you
-- Route requests to a specific Copilot model by `model` id or family
+- a native `POST /v1/chat` endpoint
+- an OpenAI-compatible `POST /v1/chat/completions` endpoint
+- SSE streaming for both APIs
+- generated or user-supplied access tokens
+- request-level model routing by model id or family
 
 ## Requirements
 
 - VS Code `1.91.0` or newer
-- GitHub Copilot access enabled in VS Code
+- GitHub Copilot enabled in VS Code
 - Python `3.9+` for the helper package and CLI
 
-## Project layout
+## Project Layout
 
-- `src/extension.js`: VS Code extension entrypoint and HTTP bridge
-- `copilot/`: Python client package
-- `pyproject.toml`: Python packaging metadata
-- `package.json`: VS Code extension manifest
+- `src/extension.js`: VS Code activation, server lifecycle, token and model UX
+- `src/http-handler.js`: testable HTTP routing, auth, JSON, and SSE helpers
+- `src/model-selection.js`: model matching and default selection logic
+- `bridge_your_copilot/`: Python client package and CLI
+- `tests/`: Node tests for HTTP contract and model selection
+- `.github/workflows/`: CI and VSIX release automation
 
-## Quick start
+## Quick Start
 
-1. Clone this repository and open it in VS Code.
+1. Open the repository in VS Code.
 2. Press `F5` to launch an Extension Development Host.
-3. In the new window, run `Bridge your Copilot: Start Server`.
-4. Approve Copilot consent if VS Code asks.
-5. Use `Bridge your Copilot: Copy Access Token` or `Bridge your Copilot: Copy Connection Info`.
-6. Call the local bridge on `http://127.0.0.1:8765`.
+3. Run `Bridge your Copilot: Start Server`.
+4. Optionally run:
+   `Bridge your Copilot: Copy Access Token`
+5. Or run:
+   `Bridge your Copilot: Copy Connection Info`
 
-Health check:
+The extension uses `bridgeYourCopilot.authToken` if you set one. If you leave it empty, it generates a local token and stores it in VS Code secret storage. You can rotate that generated token with `Bridge your Copilot: Rotate Access Token`.
+
+## Model Selection
+
+- `Bridge your Copilot: Select Model` chooses the default model used when requests omit `model`
+- `Bridge your Copilot: Reveal Model Details` shows the current default and all discovered models
+- `GET /v1/models` returns model ids, families, versions, and which model is currently selected
+- each request can override the default with `model` or `modelFamily`
+
+If `bridgeYourCopilot.modelFamily` is empty, startup tries `gpt-5.1 mini` aliases first, then `gpt-5 mini`, then the first available Copilot model.
+
+## API
+
+Health:
 
 ```bash
 curl http://127.0.0.1:8765/healthz
 ```
 
-List the selected model:
+Models:
 
 ```bash
 curl http://127.0.0.1:8765/v1/models
 ```
 
-The extension can manage the access token for you:
+### Native API
 
-- if `bridgeYourCopilot.authToken` is set, that value is used
-- otherwise the extension generates a local token and stores it in VS Code secret storage
-- use the Command Palette:
-  `Bridge your Copilot: Copy Access Token`
-- use the Command Palette:
-  `Bridge your Copilot: Copy Connection Info`
-- use the Command Palette:
-  `Bridge your Copilot: Select Model`
-- if `bridgeYourCopilot.modelFamily` is empty, the extension first tries `gpt-5.1 mini` aliases, then `gpt-5 mini`, then the first available model
-
-## Native API
-
-Non-streaming request:
+Non-streaming:
 
 ```bash
 curl -X POST http://127.0.0.1:8765/v1/chat \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer YOUR_TOKEN' \
-  -d '{"prompt":"Explain BFS in one paragraph."}'
+  -d '{"prompt":"Explain BFS in one paragraph.","model":"gpt-5-mini"}'
 ```
 
-Streaming request:
+Streaming:
 
 ```bash
 curl -N -X POST http://127.0.0.1:8765/v1/chat \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer YOUR_TOKEN' \
-  -d '{"prompt":"Explain BFS in one paragraph.","stream":true,"model":"gpt-4o"}'
+  -d '{"prompt":"Write a short release note.","stream":true}'
 ```
 
-The native streaming endpoint returns Server-Sent Events with `chunk` and `done` events.
+Native streaming returns SSE `ready`, `chunk`, and `done` events plus keep-alive heartbeats.
 
-## OpenAI-compatible API
+### OpenAI-Compatible API
 
-Non-streaming request:
+Non-streaming:
 
 ```bash
 curl -X POST http://127.0.0.1:8765/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer YOUR_TOKEN' \
-  -d '{"model":"gpt-4o","messages":[{"role":"user","content":"Summarize this repo."}]}'
+  -d '{"model":"gpt-5-mini","messages":[{"role":"user","content":"Summarize this repo."}]}'
 ```
 
-Streaming request:
+Streaming:
 
 ```bash
 curl -N -X POST http://127.0.0.1:8765/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer YOUR_TOKEN' \
-  -d '{"model":"gpt-4o","stream":true,"messages":[{"role":"user","content":"Write a haiku about debugging."}]}'
+  -d '{"model":"gpt-5-mini","stream":true,"messages":[{"role":"user","content":"Write a haiku about debugging."}]}'
 ```
 
-This endpoint returns OpenAI-style SSE chunks followed by `data: [DONE]`.
+OpenAI-compatible streaming returns SSE chunks followed by `data: [DONE]`.
 
-Model routing rules:
-
-- `model` may be a model id returned by `GET /v1/models`
-- `model` may also be a model family such as `gpt-4o`
-- if omitted, the extension uses the selected default model
-
-## Python package
+## Python Client
 
 Install locally:
 
@@ -122,69 +118,81 @@ Install locally:
 pip install -e .
 ```
 
-Python usage:
+Basic usage:
 
 ```python
-from copilot import CopilotClient
+from bridge_your_copilot import BridgeYourCopilotClient
 
-client = CopilotClient(api_key="my-local-token")
-print(client.ask("Summarize the latest git diff in Korean.", model="gpt-4o"))
+client = BridgeYourCopilotClient(api_key="YOUR_TOKEN")
+print(client.ask("Summarize the latest git diff in Korean.", model="gpt-5-mini"))
 ```
 
-Streaming with Python:
+Streaming:
 
 ```python
-from copilot import CopilotClient
+from bridge_your_copilot import BridgeYourCopilotClient
 
-client = CopilotClient()
+client = BridgeYourCopilotClient(api_key="YOUR_TOKEN")
 for chunk in client.stream_chat_completion(
     [{"role": "user", "content": "Write a short release note."}],
-    model="gpt-4o",
+    model="gpt-5-mini",
 ):
     print(chunk, end="", flush=True)
 print()
 ```
 
-CLI usage:
+CLI:
 
 ```bash
-bridge-your-copilot "Explain Dijkstra briefly."
-bridge-your-copilot --model gpt-4o "Explain Dijkstra briefly."
-bridge-your-copilot --stream --model gpt-4o "Write a short poem about latency."
+bridge-your-copilot --model gpt-5-mini "Explain Dijkstra briefly."
+bridge-your-copilot --stream --model gpt-5-mini "Write a short poem about latency."
 ```
 
-## OpenAI SDK example
+## OpenAI SDK Example
 
 ```python
 from openai import OpenAI
 
 client = OpenAI(
     base_url="http://127.0.0.1:8765/v1",
-    api_key="my-local-token",
+    api_key="YOUR_TOKEN",
 )
 
 response = client.chat.completions.create(
-    model="gpt-4o",
+    model="gpt-5-mini",
     messages=[{"role": "user", "content": "Explain BFS briefly."}],
 )
 print(response.choices[0].message.content)
 ```
 
-## Configuration
+## Development
 
-VS Code settings:
+Validation:
+
+```bash
+npm run check
+npm test
+```
+
+Package a VSIX:
+
+```bash
+vsce package
+```
+
+The release workflow packages a VSIX on tags matching `v*` and uploads it to the GitHub release.
+
+## Configuration
 
 - `bridgeYourCopilot.port`: local port, default `8765`
 - `bridgeYourCopilot.host`: bind host, default `127.0.0.1`
-- `bridgeYourCopilot.modelFamily`: optional preferred model family; if empty the extension first tries `gpt-5.1 mini` aliases and then `gpt-5 mini`
-- `bridgeYourCopilot.defaultInstruction`: prepended as a user message
-- `bridgeYourCopilot.authToken`: optional shared secret override accepted as `Authorization: Bearer ...` or `X-Bridge-Your-Copilot-Token`
+- `bridgeYourCopilot.modelFamily`: preferred startup model family
+- `bridgeYourCopilot.defaultInstruction`: prepended user instruction
+- `bridgeYourCopilot.authToken`: optional token override; if empty the extension manages a generated token for you
 
-Keep the bridge on `127.0.0.1` unless you explicitly want remote access.
-
-## Notes and limitations
+## Notes
 
 - Start the server from a VS Code command because `selectChatModels(...)` requires user action.
-- The VS Code LM API currently exposes user and assistant messages only, so `system` and `developer` roles are folded into user instructions.
-- Usage token counts are returned as `0` because the VS Code LM API does not expose exact token accounting here.
-- This project bridges local editor access. It does not control the built-in Copilot Chat UI.
+- The VS Code LM API exposes user and assistant messages only, so `system` and `developer` roles are folded into user instructions.
+- Token usage values are returned as `0` because the VS Code LM API does not expose exact accounting here.
+- Keep the server bound to `127.0.0.1` unless you intentionally want remote access.
