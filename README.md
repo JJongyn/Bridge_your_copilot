@@ -8,73 +8,46 @@
 
 Bridge-your-copilot exposes the VS Code Language Model API over `localhost` so local scripts, agents, and tools can reuse GitHub Copilot access from your editor.
 
-It ships as a VS Code extension with:
+## Install
 
-- a native `POST /v1/chat` endpoint
-- an OpenAI-compatible `POST /v1/chat/completions` endpoint
-- SSE streaming for both APIs
-- generated or user-supplied access tokens
-- per-request model routing by model id or family
-
-## Requirements
+Requirements:
 
 - VS Code `1.91.0` or newer
 - GitHub Copilot enabled in VS Code
-- Python `3.9+` for the helper package and CLI
+- Python `3.9+` if you want the helper package and CLI
 
-## Project Layout
+Development install:
 
-- `src/extension.js`: activation, server lifecycle, token and model UX
-- `src/http-handler.js`: testable HTTP routing, auth, JSON, and SSE helpers
-- `src/model-selection.js`: model matching and default selection logic
-- `bridge_your_copilot/`: Python client package and CLI
-- `tests/`: Node tests for HTTP contract and model selection
-- `.github/workflows/`: CI and VSIX release automation
+1. Clone this repository.
+2. Open it in VS Code.
+3. Press `F5` to launch an Extension Development Host.
+4. In the new window, run `Bridge your Copilot: Start Server`.
 
-## Quick Start
+VSIX install:
 
-1. Open the repository in VS Code.
-2. Press `F5` to launch an Extension Development Host.
-3. Run `Bridge your Copilot: Start Server`.
-4. Run `Bridge your Copilot: Copy Connection Info` or `Bridge your Copilot: Copy Access Token`.
-5. Call the local bridge on `http://127.0.0.1:8765`.
+1. Build a package with `vsce package`.
+2. In VS Code, run `Extensions: Install from VSIX...`.
+3. Pick `bridge-your-copilot-0.1.0.vsix`.
+4. Run `Bridge your Copilot: Start Server`.
 
-If `bridgeYourCopilot.authToken` is empty, the extension generates a local token and stores it in VS Code secret storage. You can rotate it later with `Bridge your Copilot: Rotate Access Token`.
+## First Use
 
-## Command Palette
+After the server starts:
 
-- `Bridge your Copilot: Start Server`: starts the local bridge and selects a default model
-- `Bridge your Copilot: Stop Server`: stops the local bridge
-- `Bridge your Copilot: Show Status`: shows base URL and current model
-- `Bridge your Copilot: Select Model`: chooses the default model for requests without `model`
-- `Bridge your Copilot: Reveal Model Details`: lists all discovered models in the output panel
-- `Bridge your Copilot: Copy Access Token`: copies the active bearer token
-- `Bridge your Copilot: Copy Connection Info`: copies base URL, token, and selected model
-- `Bridge your Copilot: Rotate Access Token`: generates a new stored token when settings do not override one
-
-## Model Selection
-
-- `GET /v1/models` returns discovered model ids, families, versions, and which model is selected
-- every request can override the default with `model` or `modelFamily`
-- if `bridgeYourCopilot.modelFamily` is empty, startup tries `gpt-5.1 mini` aliases first, then `gpt-5 mini`, then the first available Copilot model
-
-## API
-
-Health:
+1. Run `Bridge your Copilot: Copy Connection Info` or `Bridge your Copilot: Copy Access Token`.
+2. Check health:
 
 ```bash
 curl http://127.0.0.1:8765/healthz
 ```
 
-Models:
+3. List available models:
 
 ```bash
 curl http://127.0.0.1:8765/v1/models
 ```
 
-### Native API
-
-Non-streaming:
+4. Send your first request:
 
 ```bash
 curl -X POST http://127.0.0.1:8765/v1/chat \
@@ -83,40 +56,9 @@ curl -X POST http://127.0.0.1:8765/v1/chat \
   -d '{"prompt":"Explain BFS in one paragraph.","model":"gpt-5-mini"}'
 ```
 
-Streaming:
+If `bridgeYourCopilot.authToken` is empty, the extension generates a local token and stores it in VS Code secret storage. You can rotate it later with `Bridge your Copilot: Rotate Access Token`.
 
-```bash
-curl -N -X POST http://127.0.0.1:8765/v1/chat \
-  -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer YOUR_TOKEN' \
-  -d '{"prompt":"Write a short release note.","stream":true}'
-```
-
-Native streaming returns SSE `ready`, `chunk`, and `done` events plus keep-alive heartbeats.
-
-### OpenAI-Compatible API
-
-Non-streaming:
-
-```bash
-curl -X POST http://127.0.0.1:8765/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer YOUR_TOKEN' \
-  -d '{"model":"gpt-5-mini","messages":[{"role":"user","content":"Summarize this repo."}]}'
-```
-
-Streaming:
-
-```bash
-curl -N -X POST http://127.0.0.1:8765/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer YOUR_TOKEN' \
-  -d '{"model":"gpt-5-mini","stream":true,"messages":[{"role":"user","content":"Write a haiku about debugging."}]}'
-```
-
-OpenAI-compatible streaming returns SSE chunks followed by `data: [DONE]`.
-
-## Python Client
+## Python
 
 Install locally:
 
@@ -147,14 +89,34 @@ for chunk in client.stream_chat_completion(
 print()
 ```
 
-CLI:
+## CLI
 
 ```bash
 bridge-your-copilot --model gpt-5-mini "Explain Dijkstra briefly."
 bridge-your-copilot --stream --model gpt-5-mini "Write a short poem about latency."
 ```
 
-## OpenAI SDK Example
+## OpenAI-Compatible API
+
+Non-streaming:
+
+```bash
+curl -X POST http://127.0.0.1:8765/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -d '{"model":"gpt-5-mini","messages":[{"role":"user","content":"Summarize this repo."}]}'
+```
+
+Streaming:
+
+```bash
+curl -N -X POST http://127.0.0.1:8765/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -d '{"model":"gpt-5-mini","stream":true,"messages":[{"role":"user","content":"Write a haiku about debugging."}]}'
+```
+
+OpenAI SDK:
 
 ```python
 from openai import OpenAI
@@ -171,7 +133,54 @@ response = client.chat.completions.create(
 print(response.choices[0].message.content)
 ```
 
+## Native API
+
+Streaming:
+
+```bash
+curl -N -X POST http://127.0.0.1:8765/v1/chat \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -d '{"prompt":"Write a short release note.","stream":true}'
+```
+
+Native streaming returns SSE `ready`, `chunk`, and `done` events plus keep-alive heartbeats.
+
+## Command Palette
+
+- `Bridge your Copilot: Start Server`
+- `Bridge your Copilot: Stop Server`
+- `Bridge your Copilot: Show Status`
+- `Bridge your Copilot: Select Model`
+- `Bridge your Copilot: Reveal Model Details`
+- `Bridge your Copilot: Copy Access Token`
+- `Bridge your Copilot: Copy Connection Info`
+- `Bridge your Copilot: Rotate Access Token`
+
+## Model Selection
+
+- `GET /v1/models` returns discovered model ids, families, versions, and which model is selected
+- each request can override the default with `model` or `modelFamily`
+- if `bridgeYourCopilot.modelFamily` is empty, startup tries `gpt-5.1 mini` aliases first, then `gpt-5 mini`, then the first available Copilot model
+
+## Configuration
+
+- `bridgeYourCopilot.port`: local port, default `8765`
+- `bridgeYourCopilot.host`: bind host, default `127.0.0.1`
+- `bridgeYourCopilot.modelFamily`: preferred startup model family
+- `bridgeYourCopilot.defaultInstruction`: prepended user instruction
+- `bridgeYourCopilot.authToken`: optional token override; if empty the extension manages a generated token for you
+
 ## Development
+
+Project layout:
+
+- `src/extension.js`: activation, server lifecycle, token and model UX
+- `src/http-handler.js`: testable HTTP routing, auth, JSON, and SSE helpers
+- `src/model-selection.js`: model matching and default selection logic
+- `bridge_your_copilot/`: Python client package and CLI
+- `tests/`: Node tests for HTTP contract and model selection
+- `.github/workflows/`: CI and VSIX release automation
 
 Validation:
 
@@ -187,14 +196,6 @@ vsce package
 ```
 
 The release workflow packages a VSIX on tags matching `v*` and uploads it to the GitHub release.
-
-## Configuration
-
-- `bridgeYourCopilot.port`: local port, default `8765`
-- `bridgeYourCopilot.host`: bind host, default `127.0.0.1`
-- `bridgeYourCopilot.modelFamily`: preferred startup model family
-- `bridgeYourCopilot.defaultInstruction`: prepended user instruction
-- `bridgeYourCopilot.authToken`: optional token override; if empty the extension manages a generated token for you
 
 ## Notes
 
