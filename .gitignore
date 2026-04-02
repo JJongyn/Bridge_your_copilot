@@ -1,4 +1,4 @@
-*.vsix
 __pycache__/
 *.pyc
 .DS_Store
+*.vsix

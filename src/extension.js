@@ -1,14 +1,19 @@
+const crypto = require('crypto')
 const http = require('http')
 const vscode = require('vscode')
 
 const EXTENSION_NAME = 'Bridge your Copilot'
 const CONFIG_SECTION = 'bridgeYourCopilot'
 const TOKEN_HEADER = 'x-bridge-your-copilot-token'
+const TOKEN_SECRET_KEY = 'bridge-your-copilot.auth-token'
 
 let outputChannel
 let server
 let selectedModel
+let availableModels = []
 let selectedModelSummary = 'uninitialized'
+let extensionContext
+let runtimeAuthToken = ''
 
 function assertLanguageModelApiAvailable() {
   if (
@@ -32,6 +37,10 @@ function getConfig() {
     defaultInstruction: config.get('defaultInstruction', '') || '',
     authToken: config.get('authToken', '') || ''
   }
+}
+
+function normalizeString(value) {
+  return typeof value === 'string' ? value.trim() : ''
 }
 
 function log(message) {
@@ -213,19 +222,16 @@ function createOpenAIChatMessages(payload, config) {
 }
 
 function getSelectedModelInfo() {
-  if (!selectedModel) {
-    return null
-  }
-
-  return {
-    id: selectedModel.id,
+  return availableModels.map(model => ({
+    id: model.id,
     object: 'model',
     created: 0,
-    owned_by: selectedModel.vendor,
-    family: selectedModel.family,
-    version: selectedModel.version,
-    max_input_tokens: selectedModel.maxInputTokens
-  }
+    owned_by: model.vendor,
+    family: model.family,
+    version: model.version,
+    max_input_tokens: model.maxInputTokens,
+    selected: selectedModel ? model.id === selectedModel.id : false
+  }))
 }
 
 function getAuthorizationToken(req) {
@@ -250,30 +256,147 @@ function isAuthorized(req, expectedToken) {
   return getAuthorizationToken(req) === expectedToken
 }
 
-async function selectModelFromUserAction() {
-  assertLanguageModelApiAvailable()
-  const config = getConfig()
-  const selector = { vendor: 'copilot' }
-
-  if (config.modelFamily) {
-    selector.family = config.modelFamily
+async function getStoredAuthToken() {
+  if (!extensionContext) {
+    return ''
   }
 
-  log(`Selecting Copilot model with selector ${JSON.stringify(selector)}`)
+  return (await extensionContext.secrets.get(TOKEN_SECRET_KEY)) || ''
+}
 
-  const models = await vscode.lm.selectChatModels(selector)
-  if (!models.length) {
+async function loadRuntimeAuthToken() {
+  const configuredToken = normalizeString(getConfig().authToken)
+  if (configuredToken) {
+    runtimeAuthToken = configuredToken
+    return runtimeAuthToken
+  }
+
+  runtimeAuthToken = await getStoredAuthToken()
+  return runtimeAuthToken
+}
+
+async function ensureRuntimeAuthToken() {
+  const configuredToken = normalizeString(getConfig().authToken)
+  if (configuredToken) {
+    runtimeAuthToken = configuredToken
+    return runtimeAuthToken
+  }
+
+  const storedToken = await getStoredAuthToken()
+  if (storedToken) {
+    runtimeAuthToken = storedToken
+    return runtimeAuthToken
+  }
+
+  runtimeAuthToken = crypto.randomBytes(24).toString('hex')
+  await extensionContext.secrets.store(TOKEN_SECRET_KEY, runtimeAuthToken)
+  return runtimeAuthToken
+}
+
+function describeModel(model) {
+  return `${model.vendor}/${model.family} (${model.id})`
+}
+
+function findModelMatch(requestedModel) {
+  const requested = normalizeString(requestedModel).toLowerCase()
+  if (!requested || requested === 'copilot') {
+    return undefined
+  }
+
+  return availableModels.find(model => {
+    const candidates = [
+      model.id,
+      model.family,
+      `${model.vendor}/${model.family}`,
+      `${model.vendor}/${model.id}`,
+      `${model.family}:${model.version || ''}`,
+      `${model.vendor}/${model.family}:${model.version || ''}`
+    ]
+
+    return candidates.some(candidate => normalizeString(candidate).toLowerCase() === requested)
+  })
+}
+
+function pickInitialModel(models, requestedModel) {
+  return findModelMatch(requestedModel) || models[0]
+}
+
+async function refreshAvailableModelsFromUserAction() {
+  assertLanguageModelApiAvailable()
+  log('Loading available Copilot models')
+  availableModels = await vscode.lm.selectChatModels({ vendor: 'copilot' })
+
+  if (!availableModels.length) {
+    throw new Error('No Copilot models available')
+  }
+
+  return availableModels
+}
+
+function setSelectedModel(model) {
+  selectedModel = model
+  selectedModelSummary = describeModel(model)
+  log(`Selected model ${selectedModelSummary}`)
+  return selectedModel
+}
+
+async function selectModelFromUserAction(requestedModel) {
+  const config = getConfig()
+  const models = await refreshAvailableModelsFromUserAction()
+  const preferredModel = pickInitialModel(models, requestedModel || config.modelFamily)
+
+  if (!preferredModel) {
+    throw new Error('No Copilot models available')
+  }
+
+  return setSelectedModel(preferredModel)
+}
+
+async function pickModelFromQuickPick() {
+  const models = await refreshAvailableModelsFromUserAction()
+  const items = models.map(model => ({
+    label: model.family || model.id,
+    description: model.id,
+    detail: `${model.vendor} | version ${model.version || 'unknown'} | max input ${model.maxInputTokens || 'unknown'}`,
+    model
+  }))
+
+  const choice = await vscode.window.showQuickPick(items, {
+    title: `${EXTENSION_NAME}: Select Model`,
+    placeHolder: 'Choose which Copilot model to use by default'
+  })
+
+  if (!choice) {
+    return undefined
+  }
+
+  return setSelectedModel(choice.model)
+}
+
+async function resolveModelForPayload(payload) {
+  if (!availableModels.length) {
+    await refreshAvailableModelsFromUserAction()
+  }
+
+  const requestedModel = normalizeString(payload && payload.model)
+  const requestedFamily = normalizeString(payload && payload.modelFamily)
+  const requested = requestedModel && requestedModel !== 'copilot' ? requestedModel : requestedFamily
+
+  if (!requested) {
+    if (selectedModel) {
+      return selectedModel
+    }
+    return selectModelFromUserAction()
+  }
+
+  const matchedModel = findModelMatch(requested)
+  if (!matchedModel) {
     throw new Error(
-      config.modelFamily
-        ? `No Copilot models available for family "${config.modelFamily}"`
-        : 'No Copilot models available'
+      `Requested model "${requested}" is not available. Call GET /v1/models to inspect supported models.`
     )
   }
 
-  selectedModel = models[0]
-  selectedModelSummary = `${selectedModel.vendor}/${selectedModel.family} (${selectedModel.id})`
-  log(`Selected model ${selectedModelSummary}`)
-  return selectedModel
+  return matchedModel
 }
 
 async function ensureModelAvailable() {
@@ -302,8 +425,8 @@ function extractTextPart(chunk) {
   return ''
 }
 
-async function startModelRequest(messages) {
-  const model = await ensureModelAvailable()
+async function startModelRequest(messages, payload) {
+  const model = await resolveModelForPayload(payload)
   const tokenSource = new vscode.CancellationTokenSource()
   const response = await model.sendRequest(messages, {}, tokenSource.token)
   return { model, response, tokenSource }
@@ -331,8 +454,8 @@ async function consumeModelText(request, onTextPart) {
   return text
 }
 
-async function generateText(messages) {
-  const request = await startModelRequest(messages)
+async function generateText(messages, payload) {
+  const request = await startModelRequest(messages, payload)
   const text = await consumeModelText(request)
   return { model: request.model, text }
 }
@@ -391,28 +514,26 @@ function makeOpenAIStreamChunk(model, completionId, created, delta, finishReason
 async function handleBridgeChat(payload) {
   const config = getConfig()
   const messages = createBridgeMessages(payload, config)
-  log(`Forwarding bridge request with ${messages.length} prompt messages to ${selectedModelSummary}`)
-  const { model, text } = await generateText(messages)
+  const { model, text } = await generateText(messages, payload)
+  log(`Forwarding bridge request with ${messages.length} prompt messages to ${describeModel(model)}`)
   return makeBridgeResponse(model, text)
 }
 
 async function handleOpenAIChatCompletion(payload) {
   const config = getConfig()
   const messages = createOpenAIChatMessages(payload, config)
-  log(
-    `Forwarding OpenAI-compatible request with ${messages.length} prompt messages to ${selectedModelSummary}`
-  )
-  const { model, text } = await generateText(messages)
+  const { model, text } = await generateText(messages, payload)
+  log(`Forwarding OpenAI-compatible request with ${messages.length} prompt messages to ${describeModel(model)}`)
   return makeOpenAIChatCompletion(model, createCompletionId(), Math.floor(Date.now() / 1000), text)
 }
 
 async function streamBridgeChat(payload, req, res) {
   const config = getConfig()
   const messages = createBridgeMessages(payload, config)
-  const request = await startModelRequest(messages)
+  const request = await startModelRequest(messages, payload)
   const closeListener = () => request.tokenSource.cancel()
 
-  log(`Streaming bridge request with ${messages.length} prompt messages to ${selectedModelSummary}`)
+  log(`Streaming bridge request with ${messages.length} prompt messages to ${describeModel(request.model)}`)
   req.on('close', closeListener)
   startSse(res)
 
@@ -430,14 +551,12 @@ async function streamBridgeChat(payload, req, res) {
 async function streamOpenAIChatCompletion(payload, req, res) {
   const config = getConfig()
   const messages = createOpenAIChatMessages(payload, config)
-  const request = await startModelRequest(messages)
+  const request = await startModelRequest(messages, payload)
   const completionId = createCompletionId()
   const created = Math.floor(Date.now() / 1000)
   const closeListener = () => request.tokenSource.cancel()
 
-  log(
-    `Streaming OpenAI-compatible request with ${messages.length} prompt messages to ${selectedModelSummary}`
-  )
+  log(`Streaming OpenAI-compatible request with ${messages.length} prompt messages to ${describeModel(request.model)}`)
   req.on('close', closeListener)
   startSse(res)
 
@@ -471,12 +590,41 @@ function respondWithStreamError(res, error) {
   res.end()
 }
 
+function buildConnectionInfo() {
+  const config = getConfig()
+  return {
+    baseUrl: `http://${config.host}:${config.port}/v1`,
+    healthUrl: `http://${config.host}:${config.port}/healthz`,
+    token: runtimeAuthToken || '(not configured)',
+    model: selectedModel ? describeModel(selectedModel) : 'unselected'
+  }
+}
+
+async function copyAccessToken() {
+  const token = await ensureRuntimeAuthToken()
+  await vscode.env.clipboard.writeText(token)
+  vscode.window.showInformationMessage(`${EXTENSION_NAME} access token copied to clipboard.`)
+}
+
+async function copyConnectionInfo() {
+  const info = buildConnectionInfo()
+  const text = [
+    `BASE_URL=${info.baseUrl}`,
+    `AUTH_TOKEN=${info.token}`,
+    `MODEL=${info.model}`
+  ].join('\n')
+
+  await vscode.env.clipboard.writeText(text)
+  vscode.window.showInformationMessage(`${EXTENSION_NAME} connection info copied to clipboard.`)
+}
+
 async function startServer() {
   if (server) {
     vscode.window.showInformationMessage(`${EXTENSION_NAME} server is already running.`)
     return
   }
 
+  await ensureRuntimeAuthToken()
   await selectModelFromUserAction()
   const config = getConfig()
 
@@ -488,7 +636,8 @@ async function startServer() {
         jsonResponse(res, 200, {
           ok: true,
           status: 'running',
-          model: selectedModelSummary
+          model: selectedModelSummary,
+          token_configured: Boolean(runtimeAuthToken)
         })
         return
       }
@@ -498,19 +647,19 @@ async function startServer() {
         (url.pathname === '/models' || url.pathname === '/v1/models')
       ) {
         const modelInfo = getSelectedModelInfo()
-        if (!modelInfo) {
+        if (!modelInfo.length) {
           errorResponse(res, 503, 'Model not selected')
           return
         }
 
         jsonResponse(res, 200, {
           object: 'list',
-          data: [modelInfo]
+          data: modelInfo
         })
         return
       }
 
-      if (!isAuthorized(req, config.authToken)) {
+      if (!isAuthorized(req, runtimeAuthToken)) {
         errorResponse(res, 401, 'Unauthorized', 'authentication_error')
         return
       }
@@ -583,9 +732,17 @@ async function startServer() {
   })
 
   log(`${EXTENSION_NAME} listening on http://${config.host}:${config.port}`)
-  vscode.window.showInformationMessage(
-    `${EXTENSION_NAME} listening on http://${config.host}:${config.port}`
+  const action = await vscode.window.showInformationMessage(
+    `${EXTENSION_NAME} listening on http://${config.host}:${config.port}`,
+    'Copy Token',
+    'Copy Connection Info'
   )
+
+  if (action === 'Copy Token') {
+    await copyAccessToken()
+  } else if (action === 'Copy Connection Info') {
+    await copyConnectionInfo()
+  }
 }
 
 async function stopServer() {
@@ -613,20 +770,23 @@ async function stopServer() {
 }
 
 function showStatus() {
-  const config = getConfig()
+  const info = buildConnectionInfo()
   const state = server ? 'running' : 'stopped'
   vscode.window.showInformationMessage(
-    `${EXTENSION_NAME} is ${state} on http://${config.host}:${config.port} using ${selectedModelSummary}`
+    `${EXTENSION_NAME} is ${state} on ${info.baseUrl} using ${info.model}`
   )
 }
 
 function activate(context) {
+  extensionContext = context
   outputChannel = vscode.window.createOutputChannel(EXTENSION_NAME)
   context.subscriptions.push(outputChannel)
 
   if (!vscode.lm || typeof vscode.lm.selectChatModels !== 'function') {
     log('Language Model API not available. VS Code 1.91 or newer is required.')
   }
+
+  void loadRuntimeAuthToken()
 
   context.subscriptions.push(
     vscode.commands.registerCommand('bridgeYourCopilot.startServer', async () => {
@@ -654,6 +814,45 @@ function activate(context) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('bridgeYourCopilot.showStatus', showStatus)
+  )
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('bridgeYourCopilot.selectModel', async () => {
+      try {
+        const model = await pickModelFromQuickPick()
+        if (model) {
+          vscode.window.showInformationMessage(`${EXTENSION_NAME} selected model: ${describeModel(model)}`)
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        log(`Failed to select model: ${message}`)
+        vscode.window.showErrorMessage(`${EXTENSION_NAME} failed to select model: ${message}`)
+      }
+    })
+  )
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('bridgeYourCopilot.copyAccessToken', async () => {
+      try {
+        await copyAccessToken()
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        log(`Failed to copy access token: ${message}`)
+        vscode.window.showErrorMessage(`${EXTENSION_NAME} failed to copy access token: ${message}`)
+      }
+    })
+  )
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('bridgeYourCopilot.copyConnectionInfo', async () => {
+      try {
+        await copyConnectionInfo()
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        log(`Failed to copy connection info: ${message}`)
+        vscode.window.showErrorMessage(`${EXTENSION_NAME} failed to copy connection info: ${message}`)
+      }
+    })
   )
 }
 

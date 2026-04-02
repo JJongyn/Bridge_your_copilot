@@ -33,7 +33,10 @@
   "activationEvents": [
     "onCommand:bridgeYourCopilot.startServer",
     "onCommand:bridgeYourCopilot.stopServer",
-    "onCommand:bridgeYourCopilot.showStatus"
+    "onCommand:bridgeYourCopilot.showStatus",
+    "onCommand:bridgeYourCopilot.selectModel",
+    "onCommand:bridgeYourCopilot.copyAccessToken",
+    "onCommand:bridgeYourCopilot.copyConnectionInfo"
   ],
   "contributes": {
     "commands": [
@@ -48,6 +51,18 @@
       {
         "command": "bridgeYourCopilot.showStatus",
         "title": "Bridge your Copilot: Show Status"
+      },
+      {
+        "command": "bridgeYourCopilot.selectModel",
+        "title": "Bridge your Copilot: Select Model"
+      },
+      {
+        "command": "bridgeYourCopilot.copyAccessToken",
+        "title": "Bridge your Copilot: Copy Access Token"
+      },
+      {
+        "command": "bridgeYourCopilot.copyConnectionInfo",
+        "title": "Bridge your Copilot: Copy Connection Info"
       }
     ],
     "configuration": {
@@ -68,7 +83,7 @@
         "bridgeYourCopilot.modelFamily": {
           "type": "string",
           "default": "",
-          "description": "Optional Copilot model family selector, for example gpt-4o, gpt-4o-mini, or claude-3.5-sonnet."
+          "description": "Preferred Copilot model family selected when the server starts, for example gpt-4o, gpt-4o-mini, or claude-3.5-sonnet."
         },
         "bridgeYourCopilot.defaultInstruction": {
           "type": "string",
@@ -78,7 +93,7 @@
         "bridgeYourCopilot.authToken": {
           "type": "string",
           "default": "",
-          "description": "Optional shared secret. When set, callers must send it as X-Bridge-Your-Copilot-Token."
+          "description": "Optional shared secret override. When empty, the extension generates and stores a local token for you."
         }
       }
     }

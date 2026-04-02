@@ -15,6 +15,8 @@ It runs as a VS Code extension, starts a local HTTP server from the Command Pale
 - Call a simple local endpoint instead of automating the VS Code UI
 - Use OpenAI SDKs against `http://127.0.0.1:8765/v1`
 - Stream chat completion output when your client supports SSE
+- Let the extension generate and copy a local access token for you
+- Route requests to a specific Copilot model by `model` id or family
 
 ## Requirements
 
@@ -35,7 +37,8 @@ It runs as a VS Code extension, starts a local HTTP server from the Command Pale
 2. Press `F5` to launch an Extension Development Host.
 3. In the new window, run `Bridge your Copilot: Start Server`.
 4. Approve Copilot consent if VS Code asks.
-5. Call the local bridge on `http://127.0.0.1:8765`.
+5. Use `Bridge your Copilot: Copy Access Token` or `Bridge your Copilot: Copy Connection Info`.
+6. Call the local bridge on `http://127.0.0.1:8765`.
 
 Health check:
 
@@ -49,6 +52,17 @@ List the selected model:
 curl http://127.0.0.1:8765/v1/models
 ```
 
+The extension can manage the access token for you:
+
+- if `bridgeYourCopilot.authToken` is set, that value is used
+- otherwise the extension generates a local token and stores it in VS Code secret storage
+- use the Command Palette:
+  `Bridge your Copilot: Copy Access Token`
+- use the Command Palette:
+  `Bridge your Copilot: Copy Connection Info`
+- use the Command Palette:
+  `Bridge your Copilot: Select Model`
+
 ## Native API
 
 Non-streaming request:
@@ -56,6 +70,7 @@ Non-streaming request:
 ```bash
 curl -X POST http://127.0.0.1:8765/v1/chat \
   -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
   -d '{"prompt":"Explain BFS in one paragraph."}'
 ```
 
@@ -64,7 +79,8 @@ Streaming request:
 ```bash
 curl -N -X POST http://127.0.0.1:8765/v1/chat \
   -H 'Content-Type: application/json' \
-  -d '{"prompt":"Explain BFS in one paragraph.","stream":true}'
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -d '{"prompt":"Explain BFS in one paragraph.","stream":true,"model":"gpt-4o"}'
 ```
 
 The native streaming endpoint returns Server-Sent Events with `chunk` and `done` events.
@@ -76,7 +92,8 @@ Non-streaming request:
 ```bash
 curl -X POST http://127.0.0.1:8765/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -d '{"model":"copilot","messages":[{"role":"user","content":"Summarize this repo."}]}'
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -d '{"model":"gpt-4o","messages":[{"role":"user","content":"Summarize this repo."}]}'
 ```
 
 Streaming request:
@@ -84,10 +101,17 @@ Streaming request:
 ```bash
 curl -N -X POST http://127.0.0.1:8765/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -d '{"model":"copilot","stream":true,"messages":[{"role":"user","content":"Write a haiku about debugging."}]}'
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -d '{"model":"gpt-4o","stream":true,"messages":[{"role":"user","content":"Write a haiku about debugging."}]}'
 ```
 
 This endpoint returns OpenAI-style SSE chunks followed by `data: [DONE]`.
+
+Model routing rules:
+
+- `model` may be a model id returned by `GET /v1/models`
+- `model` may also be a model family such as `gpt-4o`
+- if omitted, the extension uses the selected default model
 
 ## Python package
 
@@ -103,7 +127,7 @@ Python usage:
 from copilot import CopilotClient
 
 client = CopilotClient(api_key="my-local-token")
-print(client.ask("Summarize the latest git diff in Korean."))
+print(client.ask("Summarize the latest git diff in Korean.", model="gpt-4o"))
 ```
 
 Streaming with Python:
@@ -113,7 +137,8 @@ from copilot import CopilotClient
 
 client = CopilotClient()
 for chunk in client.stream_chat_completion(
-    [{"role": "user", "content": "Write a short release note."}]
+    [{"role": "user", "content": "Write a short release note."}],
+    model="gpt-4o",
 ):
     print(chunk, end="", flush=True)
 print()
@@ -123,7 +148,8 @@ CLI usage:
 
 ```bash
 bridge-your-copilot "Explain Dijkstra briefly."
-bridge-your-copilot --stream "Write a short poem about latency."
+bridge-your-copilot --model gpt-4o "Explain Dijkstra briefly."
+bridge-your-copilot --stream --model gpt-4o "Write a short poem about latency."
 ```
 
 ## OpenAI SDK example
@@ -137,7 +163,7 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="copilot",
+    model="gpt-4o",
     messages=[{"role": "user", "content": "Explain BFS briefly."}],
 )
 print(response.choices[0].message.content)
@@ -151,7 +177,7 @@ VS Code settings:
 - `bridgeYourCopilot.host`: bind host, default `127.0.0.1`
 - `bridgeYourCopilot.modelFamily`: optional model family such as `gpt-4o`
 - `bridgeYourCopilot.defaultInstruction`: prepended as a user message
-- `bridgeYourCopilot.authToken`: optional shared secret accepted as `Authorization: Bearer ...` or `X-Bridge-Your-Copilot-Token`
+- `bridgeYourCopilot.authToken`: optional shared secret override accepted as `Authorization: Bearer ...` or `X-Bridge-Your-Copilot-Token`
 
 Keep the bridge on `127.0.0.1` unless you explicitly want remote access.
 

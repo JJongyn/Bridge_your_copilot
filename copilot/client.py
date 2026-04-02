@@ -96,10 +96,13 @@ class CopilotClient:
         *,
         instruction: str = "",
         messages: list[dict[str, str]] | None = None,
+        model: str = "",
     ) -> str:
         payload: dict[str, Any] = {}
         if instruction:
             payload["instruction"] = instruction
+        if model:
+            payload["model"] = model
 
         if messages is not None:
             payload["messages"] = messages
@@ -168,6 +171,31 @@ class CopilotClient:
             instructions=instruction,
         )
         return response["choices"][0]["message"]["content"]
+
+    def stream_chat(
+        self,
+        prompt: str = "",
+        *,
+        instruction: str = "",
+        messages: list[dict[str, str]] | None = None,
+        model: str = "",
+    ) -> Iterator[str]:
+        payload: dict[str, Any] = {"stream": True}
+        if instruction:
+            payload["instruction"] = instruction
+        if model:
+            payload["model"] = model
+
+        if messages is not None:
+            payload["messages"] = messages
+        else:
+            payload["prompt"] = prompt
+
+        for data in self._stream_request("POST", "/chat", payload):
+            chunk = json.loads(data)
+            delta = chunk.get("delta")
+            if delta:
+                yield delta
 
 BridgeYourCopilotError = CopilotError
 BridgeYourCopilotClient = CopilotClient

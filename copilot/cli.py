@@ -37,6 +37,11 @@ def parse_args() -> argparse.Namespace:
         help='Raw JSON message array, for example [{"role":"user","content":"hello"}]',
     )
     parser.add_argument(
+        "--model",
+        default="",
+        help="Optional model id or family returned by GET /v1/models",
+    )
+    parser.add_argument(
         "--stream",
         action="store_true",
         help="Stream OpenAI-compatible chat completion output",
@@ -73,6 +78,7 @@ def main() -> int:
             if args.stream:
                 for chunk in client.stream_chat_completion(
                     messages,
+                    model=args.model or "copilot",
                     instructions=args.instruction,
                 ):
                     print(chunk, end="", flush=True)
@@ -81,21 +87,23 @@ def main() -> int:
 
             response = client.chat_completion(
                 messages,
+                model=args.model or "copilot",
                 instructions=args.instruction,
             )
             print(response["choices"][0]["message"]["content"])
             return 0
 
         if args.stream:
-            for chunk in client.stream_chat_completion(
-                [{"role": "user", "content": args.prompt}],
-                instructions=args.instruction,
+            for chunk in client.stream_chat(
+                args.prompt,
+                instruction=args.instruction,
+                model=args.model,
             ):
                 print(chunk, end="", flush=True)
             print()
             return 0
 
-        print(client.ask(args.prompt, instruction=args.instruction))
+        print(client.ask(args.prompt, instruction=args.instruction, model=args.model or "copilot"))
         return 0
     except CopilotError as exc:
         print(str(exc), file=sys.stderr)
