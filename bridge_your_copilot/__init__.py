@@ -1,4 +1,6 @@
 from .client import (
+    BridgeClient,
+    BridgeError,
     BridgeYourCopilotClient,
     BridgeYourCopilotError,
     CopilotClient,
@@ -8,6 +10,8 @@ from .client import (
 )
 
 __all__ = [
+    "BridgeClient",
+    "BridgeError",
     "CopilotClient",
     "CopilotError",
     "BridgeYourCopilotClient",

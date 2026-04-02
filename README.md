@@ -127,18 +127,18 @@ pip install -e .
 Basic usage:
 
 ```python
-from bridge_your_copilot import BridgeYourCopilotClient
+from bridge_your_copilot import BridgeClient
 
-client = BridgeYourCopilotClient(api_key="YOUR_TOKEN")
+client = BridgeClient(api_key="YOUR_TOKEN")
 print(client.ask("Summarize the latest git diff in Korean.", model="gpt-5-mini"))
 ```
 
 Streaming:
 
 ```python
-from bridge_your_copilot import BridgeYourCopilotClient
+from bridge_your_copilot import BridgeClient
 
-client = BridgeYourCopilotClient(api_key="YOUR_TOKEN")
+client = BridgeClient(api_key="YOUR_TOKEN")
 for chunk in client.stream_chat_completion(
     [{"role": "user", "content": "Write a short release note."}],
     model="gpt-5-mini",

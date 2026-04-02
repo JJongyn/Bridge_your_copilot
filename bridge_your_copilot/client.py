@@ -8,11 +8,11 @@ import urllib.request
 from typing import Any, Iterator
 
 
-class BridgeYourCopilotError(RuntimeError):
+class BridgeError(RuntimeError):
     """Raised when the bridge returns an error or cannot be reached."""
 
 
-class BridgeYourCopilotClient:
+class BridgeClient:
     def __init__(
         self,
         base_url: str = "http://127.0.0.1:8765/v1",
@@ -55,9 +55,9 @@ class BridgeYourCopilotClient:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
-            raise BridgeYourCopilotError(f"HTTP {exc.code}: {detail}") from exc
+            raise BridgeError(f"HTTP {exc.code}: {detail}") from exc
         except urllib.error.URLError as exc:
-            raise BridgeYourCopilotError(f"Connection error: {exc.reason}") from exc
+            raise BridgeError(f"Connection error: {exc.reason}") from exc
 
     def _stream_request(
         self, method: str, path: str, payload: dict[str, Any]
@@ -79,9 +79,9 @@ class BridgeYourCopilotClient:
                     yield line[6:]
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
-            raise BridgeYourCopilotError(f"HTTP {exc.code}: {detail}") from exc
+            raise BridgeError(f"HTTP {exc.code}: {detail}") from exc
         except urllib.error.URLError as exc:
-            raise BridgeYourCopilotError(f"Connection error: {exc.reason}") from exc
+            raise BridgeError(f"Connection error: {exc.reason}") from exc
 
     def health(self) -> dict[str, Any]:
         return self._request("GET", "/healthz")
@@ -197,7 +197,9 @@ class BridgeYourCopilotClient:
             if delta:
                 yield delta
 
-CopilotError = BridgeYourCopilotError
-CopilotClient = BridgeYourCopilotClient
-CopilotBridgeError = BridgeYourCopilotError
-CopilotBridgeClient = BridgeYourCopilotClient
+BridgeYourCopilotError = BridgeError
+BridgeYourCopilotClient = BridgeClient
+CopilotError = BridgeError
+CopilotClient = BridgeClient
+CopilotBridgeError = BridgeError
+CopilotBridgeClient = BridgeClient
